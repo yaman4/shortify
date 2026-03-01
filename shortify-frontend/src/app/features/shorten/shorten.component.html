@@ -1,0 +1,11 @@
+<div class="card">
+  <h2>Shorten a URL</h2>
+
+  <input [(ngModel)]="originalUrl" placeholder="Enter URL" />
+  <input [(ngModel)]="customAlias" placeholder="Custom alias (optional)" />
+  <input type="number" [(ngModel)]="ttlInSeconds" placeholder="TTL in seconds" />
+
+  <button (click)="shorten()">Shorten</button>
+
+  <p class="error" *ngIf="error">{{ error }}</p>
+</div>

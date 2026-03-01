@@ -1,0 +1,16 @@
+.stats-container {
+  max-width: 500px;
+  margin: 20px auto;
+  padding: 15px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+}
+
+p {
+  margin: 5px 0;
+}
+
+.error {
+  color: red;
+  text-align: center;
+}

@@ -1,0 +1,28 @@
+.shorten-container {
+  max-width: 500px;
+  margin: 20px auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+input {
+  padding: 8px;
+  font-size: 14px;
+}
+
+button {
+  padding: 10px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.result {
+  margin-top: 10px;
+  color: green;
+}
+
+.error {
+  margin-top: 10px;
+  color: red;
+}

@@ -1,222 +1,185 @@
-Shortify — URL shortener (frontend + backend)
+# Shortify
 
-Overview
+Shortify is a scalable URL shortening platform with a rich feature set for both end-users and developers. It provides fast and reliable URL redirection, custom aliases, analytics, rate limiting, AI-powered risk detection, and a responsive Angular frontend. The backend is built with Spring Boot, PostgreSQL, Redis, and Kafka for asynchronous analytics.
 
-Shortify is a simple URL-shortening project containing two parts in this repository:
+## Project Overview
 
-- shortify-backend: A Spring Boot backend (Java 21, Maven) that provides URL shortening, resolution, stats endpoints and uses PostgreSQL and Redis (for rate limiting / caching).
-- shortify-frontend: An Angular (v21) frontend that calls the backend API and includes an SSR-capable build.
+- **Frontend:** Angular SPA for creating, managing, and analyzing short URLs.
+- **Backend:** Spring Boot REST API for URL shortening, redirection, analytics, and risk detection.
+- **Database:** PostgreSQL for persistent storage, Redis for caching and distributed rate limiting.
+- **Analytics:** Kafka-based asynchronous event processing for high-throughput analytics.
 
-This README explains how to build, run, and test each part locally and how to configure the services they depend on.
+## How It Works
 
-Repository layout
+1. **Shorten a URL:**
+   - User submits a long URL (optionally with a custom alias) via the web UI or API.
+   - Backend generates a unique short code (using encoding logic, e.g., Base62) and stores the mapping in PostgreSQL.
+   - AI risk detection runs asynchronously to classify the URL.
+   - The short URL is returned to the user.
 
-- shortify-backend/ — Spring Boot application
-  - pom.xml (Java 21)
-  - src/main/resources/application.properties (default DB/Redis settings)
-  - mvnw (Maven wrapper)
+2. **Redirect:**
+   - User accesses the short URL (e.g., `/abc123`).
+   - Backend looks up the original URL (using Redis cache for speed, falling back to PostgreSQL if needed).
+   - Redirect is issued instantly (HTTP 302).
+   - An analytics event is published to Kafka for asynchronous processing.
 
-- shortify-frontend/ — Angular app
-  - package.json (npm scripts: start, build, test, serve:ssr:shortify-frontend)
-  - src/environments/environment.ts (default apiUrl for local dev)
+3. **Analytics & Stats:**
+   - Kafka consumer updates click counts and stores access analytics (timestamp, IP, user agent) in the database.
+   - Users can view statistics and trends for their short URLs via the frontend or API.
 
-Requirements
+4. **Rate Limiting:**
+   - All API endpoints are protected by distributed rate limiting (Bucket4j + Redis) to prevent abuse.
 
-- Java 21 (project property sets java.version=21)
-- Maven (you can use the provided Maven wrapper `./mvnw`)
-- PostgreSQL (local or remote)
-- Redis (local or remote)
-- Node.js and npm (package.json lists packageManager: "npm@11.6.2" and TypeScript 5.9; Node 20+ is recommended)
+## Key Features
 
-Backend (shortify-backend)
+- **Fast URL Redirection:** Optimized for low-latency redirects using Redis and indexed PostgreSQL queries.
+- **Custom Aliases:** Users can specify their own short codes.
+- **Comprehensive Analytics:** Track clicks, referrers, user agents, and more (processed asynchronously via Kafka).
+- **Rate Limiting:** Prevents abuse with configurable per-IP limits for shortening and access.
+- **AI-Powered Risk Detection:** Classifies URLs as SAFE, LOW_RISK, MEDIUM_RISK, or HIGH_RISK using async processing.
+- **Caching:** Redis is used for fast lookups and to reduce database load.
+- **Frontend UI:** Angular SPA for easy URL management and analytics visualization.
 
-Defaults (from src/main/resources/application.properties)
+## Architecture Overview
 
-- server.port=8080
-- spring.datasource.url=jdbc:postgresql://localhost:5432/shortify
-- spring.datasource.username=shortify
-- spring.datasource.password=postgres
-- spring.jpa.hibernate.ddl-auto=update
-- spring.redis.host=localhost
-- spring.redis.port=6379
+```
+User (Web/REST) → Angular Frontend → Spring Boot Backend
+                                 ├─ Shorten URL (DB/Cache, AI Risk)
+                                 ├─ Redirect (DB/Cache, Kafka Event)
+                                 └─ Analytics (Async via Kafka)
+```
 
-Build & run (development)
+## API Endpoints
 
-1. From the backend folder install/build/run using the Maven wrapper:
+### Create Short URL
+```bash
+POST /api/v1/shorten
+{
+    "originalUrl": "https://example.com/long/url",
+    "ttlInSeconds": 86400,
+    "customAlias": "my-link"
+}
+```
 
+### Redirect
+```bash
+GET /{shortCode}
+# Returns 302 with Location header, publishes analytics event
+```
+
+### Get URL Statistics
+```bash
+GET /api/v1/stats/{shortCode}
+# Returns: redirectCount, createdAt, riskLevel, etc.
+```
+
+## Analytics with Kafka (Backend)
+
+- **Non-blocking analytics:** Redirects are never delayed by analytics processing.
+- **Event-driven:** Each redirect publishes an event to Kafka.
+- **Consumer:** Processes events to increment click counts and store analytics data.
+- **Scalable:** Handles high throughput and decouples analytics from core redirect logic.
+
+## Rate Limiting
+
+- **Token Bucket Algorithm** (Bucket4j)
+- **Redis-backed** for distributed enforcement
+- **Configurable limits:**
+  - URL shortening: 10 requests/minute per IP
+  - URL access: 100 requests/minute per IP
+
+## AI Risk Detection
+
+- **Asynchronous:** URL risk is checked in the background after creation.
+- **Risk levels:** SAFE, LOW_RISK, MEDIUM_RISK, HIGH_RISK
+- **Stats available:** Users can see risk level for each short URL.
+
+## Database Schema
+
+### UrlEntity (Main URLs Table)
+```sql
+id | original_url | short_code | custom_alias | created_at | ttl_in_seconds | redirect_count | ai_checked | risk_level
+```
+
+### UrlAccessAnalytics (Analytics Table)
+```sql
+id | url_id | short_code | original_url | accessed_at | ip_address | user_agent | created_at
+```
+
+## Tech Stack
+
+### Backend
+- **Spring Boot 3.5.9**
+- **Spring Kafka 3.3.11**
+- **PostgreSQL**
+- **Redis**
+- **Bucket4j**
+- **Kafka 3.9.1**
+
+### Frontend
+- **Angular 19+**
+- **TypeScript**
+- **RxJS**
+
+## Project Structure
+
+```
+shortify/
+├── README.md
+├── shortify-backend/
+│   ├── pom.xml
+│   ├── src/main/java/com/shortify/
+│   │   ├── controller/
+│   │   ├── service/
+│   │   ├── kafka/
+│   │   ├── event/
+│   │   ├── model/
+│   │   ├── repository/
+│   │   └── config/
+│   └── src/test/java/com/shortify/
+│       └── tests/
+└── shortify-frontend/
+    └── src/app/
+```
+
+## Getting Started
+
+### Prerequisites
+- Java 21+
+- PostgreSQL 12+
+- Redis 6.0+
+- Apache Kafka 3.9+
+
+### Backend Setup
+
+1. **Configure databases** (application.properties)
+```properties
+spring.datasource.url=jdbc:postgresql://localhost:5432/shortify
+spring.redis.host=localhost
+spring.kafka.bootstrap-servers=localhost:9092
+```
+
+2. **Build and run**
 ```bash
 cd shortify-backend
+./mvnw clean install
 ./mvnw spring-boot:run
 ```
 
-This runs the app on http://localhost:8080 by default.
-
-Build a jar (production-like)
-
-```bash
-cd shortify-backend
-./mvnw clean package -DskipTests
-# then run the generated jar (name may vary):
-java -jar target/*.jar
-```
-
-Tests
-
-```bash
-cd shortify-backend
-./mvnw test
-```
-
-Configuration & Environment variables
-
-Spring Boot properties in `application.properties` can be overridden with environment variables or system properties. Some common overrides (example):
-
-- SPRING_DATASOURCE_URL (e.g. jdbc:postgresql://db:5432/shortify)
-- SPRING_DATASOURCE_USERNAME
-- SPRING_DATASOURCE_PASSWORD
-- SPRING_REDIS_HOST
-- SPRING_REDIS_PORT
-- SERVER_PORT (or SPRING_APPLICATION_JSON)
-
-Example running with env vars:
-
-```bash
-SPRING_DATASOURCE_URL=jdbc:postgresql://host:5432/shortify \
-SPRING_DATASOURCE_USERNAME=shortify \
-SPRING_DATASOURCE_PASSWORD=postgres \
-SPRING_REDIS_HOST=localhost \
-SPRING_REDIS_PORT=6379 \
-./mvnw spring-boot:run
-```
-
-Database (PostgreSQL) local quick setup
-
-If you use a local postgres (commands assume a default postgres superuser):
-
-```bash
-# As the postgres user (may need sudo depending on your install):
-# Create user and DB with the credentials used by default app
-sudo -u postgres psql -c "CREATE USER shortify WITH PASSWORD 'postgres';"
-sudo -u postgres psql -c "CREATE DATABASE shortify OWNER shortify;"
-```
-
-Adjust the SQL/commands to match how Postgres is installed on your machine (Homebrew, Docker, cloud DB, etc.).
-
-Redis local quick setup
-
-On macOS with Homebrew:
-
-```bash
-brew install redis
-brew services start redis
-# or run a quick server:
-redis-server
-```
-
-Frontend (shortify-frontend)
-
-The frontend is an Angular 21 project. It uses an `environment.ts` with a default apiUrl pointing at http://localhost:8080.
-
-Key files:
-
-- src/environments/environment.ts — development apiUrl: http://localhost:8080
-- src/environments/environment.prod.ts — production apiUrl: https://your-backend-domain.com
-- src/app/core/services/url.service.ts — the frontend hits `${environment.apiUrl}/api/v1` for backend endpoints
-
-Install, run, build
-
-1. Install dependencies
-
+### Frontend Setup
 ```bash
 cd shortify-frontend
 npm install
+ng serve --open
 ```
 
-2. Run local dev server (Angular dev server)
+## Testing
 
-```bash
-npm start
-# or
-ng serve
-```
-
-By default the dev server serves at http://localhost:4200.
-
-3. Build for production (static site)
-
-```bash
-npm run build
-# Output will be in dist/shortify-frontend
-```
-
-4. Server-Side Rendering (SSR) / production Node server
-
-This repository already has an SSR-capable setup and a package script that can serve the SSR build:
-
-```bash
-# build production (client + server) — exact command depends on your Angular workspace configuration
-npm run build
-# then run the SSR entry produced under dist/
-npm run serve:ssr:shortify-frontend
-```
-
-If you prefer to host the built static files from the backend, copy the `dist/shortify-frontend` output into the backend static resources (or configure your web server to serve those files).
-
-Connecting frontend to backend
-
-- Dev flow: run backend on port 8080 and frontend using `ng serve`. The frontend's `environment.ts` points to http://localhost:8080 already.
-- Production flow: set `environment.prod.ts`'s `apiUrl` to your backend URL, or set the environment at build time.
-
-Tests
-
-Frontend tests are configured in package.json (ng test / vitest):
-
-```bash
-cd shortify-frontend
-npm test
-```
-
-Quick local run (both services)
-
-1. Start Postgres and create DB + user (see DB section).
-2. Start Redis.
-3. Start backend:
-
+Run all Kafka integration tests:
 ```bash
 cd shortify-backend
-./mvnw spring-boot:run
+./mvnw test -Dtest=KafkaIntegrationTest
 ```
+## License
 
-4. Start frontend (in another terminal):
-
-```bash
-cd shortify-frontend
-npm install
-npm start
-```
-
-Open http://localhost:4200 and use the UI. The frontend will call the backend on http://localhost:8080 by default.
-
-Common troubleshooting
-
-- Java version errors: make sure you run with Java 21 (the pom.xml sets java.version=21).
-- DB connection errors: confirm `spring.datasource.url`, username and password are reachable and correct. Check Postgres logs for details.
-- Redis connection errors: confirm `spring.redis.host`/`spring.redis.port` or configure via env vars.
-- Port clashes: backend defaults to 8080, frontend dev server to 4200. If ports are in use, either change `server.port` or pass SERVER_PORT env var.
-- CORS issues: During local dev `ng serve` proxies requests to backend; if you see CORS errors the backend might need CORS configuration (check `controller` or `config` packages in the backend).
-
-Development notes & next steps
-
-- The backend uses Spring Data JPA (Postgres) and Redis + Bucket4j for rate limiting (see pom.xml dependencies).
-- The frontend uses Angular 21 and includes SSR-related files. Decide whether to deploy SSR or static build in production.
-- You can containerize each service (Dockerfile) or use docker-compose to bring up Postgres + Redis + backend + frontend for full-stack local testing.
-
-Contribution
-
-Contributions are welcome — open issues and PRs. Add simple unit tests and follow existing code style (Lombok is used in the backend).
-
-License
-
-Add your preferred license file to the repo (e.g. MIT, Apache-2.0) if you want to make the project public.
-
-
+MIT License - See LICENSE file for details

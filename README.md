@@ -27,7 +27,7 @@ Shortify is a full-stack URL shortener application with analytics, built with Ja
 
 ## Kafka Integration (Analytics)
 - When a user accesses a short URL, the backend:
-  1. Resolves the original URL (fast path)
+  1. Resolves the original URL, low-latency redirect path (served via Redis cache)
   2. Publishes an access event to Kafka (non-blocking)
   3. Returns redirect immediately
 - **Consumer:** Processes events to increment click counts and store analytics in the database
@@ -36,9 +36,11 @@ Shortify is a full-stack URL shortener application with analytics, built with Ja
 - **Retry / Failure Handling:**
   - The Kafka consumer is configured with retry logic. If processing fails, the event is retried. After maximum retries, the event is sent to a Dead Letter Queue (DLQ) for later inspection and manual intervention.
 - **Idempotency:**
-  - Consumer logic ensures duplicate events do not result in double-counting. This is achieved by using unique constraints or upsert logic based on event identifiers (such as a combination of shortCode and timestamp).
+  - Consumer ensures duplicate events do not result in double-counting by using idempotent processing (e.g., unique event identifiers or deduplication logic before updating analytics).
 - **Partitioning Logic:**
   - Kafka messages are partitioned by `shortCode` (used as the message key). This ensures all events for a given short URL are processed in order and enables horizontal scalability.
+- **Scalability:**
+    - Kafka consumers are part of a consumer group and can scale horizontally to handle increasing traffic without impacting redirect latency.
 
 ## Setup Instructions
 

@@ -1,185 +1,77 @@
 # Shortify
 
-Shortify is a scalable URL shortening platform with a rich feature set for both end-users and developers. It provides fast and reliable URL redirection, custom aliases, analytics, rate limiting, AI-powered risk detection, and a responsive Angular frontend. The backend is built with Spring Boot, PostgreSQL, Redis, and Kafka for asynchronous analytics.
+Shortify is a full-stack URL shortener application with analytics, built with Java Spring Boot (backend) and Angular (frontend). It provides fast URL redirection, robust analytics, and scalable architecture using PostgreSQL, Redis, and Kafka.
 
-## Project Overview
-
-- **Frontend:** Angular SPA for creating, managing, and analyzing short URLs.
-- **Backend:** Spring Boot REST API for URL shortening, redirection, analytics, and risk detection.
-- **Database:** PostgreSQL for persistent storage, Redis for caching and distributed rate limiting.
-- **Analytics:** Kafka-based asynchronous event processing for high-throughput analytics.
-
-## How It Works
-
-1. **Shorten a URL:**
-   - User submits a long URL (optionally with a custom alias) via the web UI or API.
-   - Backend generates a unique short code (using encoding logic, e.g., Base62) and stores the mapping in PostgreSQL.
-   - AI risk detection runs asynchronously to classify the URL.
-   - The short URL is returned to the user.
-
-2. **Redirect:**
-   - User accesses the short URL (e.g., `/abc123`).
-   - Backend looks up the original URL (using Redis cache for speed, falling back to PostgreSQL if needed).
-   - Redirect is issued instantly (HTTP 302).
-   - An analytics event is published to Kafka for asynchronous processing.
-
-3. **Analytics & Stats:**
-   - Kafka consumer updates click counts and stores access analytics (timestamp, IP, user agent) in the database.
-   - Users can view statistics and trends for their short URLs via the frontend or API.
-
-4. **Rate Limiting:**
-   - All API endpoints are protected by distributed rate limiting (Bucket4j + Redis) to prevent abuse.
-
-## Key Features
-
-- **Fast URL Redirection:** Optimized for low-latency redirects using Redis and indexed PostgreSQL queries.
-- **Custom Aliases:** Users can specify their own short codes.
-- **Comprehensive Analytics:** Track clicks, referrers, user agents, and more (processed asynchronously via Kafka).
-- **Rate Limiting:** Prevents abuse with configurable per-IP limits for shortening and access.
-- **AI-Powered Risk Detection:** Classifies URLs as SAFE, LOW_RISK, MEDIUM_RISK, or HIGH_RISK using async processing.
-- **Caching:** Redis is used for fast lookups and to reduce database load.
-- **Frontend UI:** Angular SPA for easy URL management and analytics visualization.
-
-## Architecture Overview
-
-```
-User (Web/REST) → Angular Frontend → Spring Boot Backend
-                                 ├─ Shorten URL (DB/Cache, AI Risk)
-                                 ├─ Redirect (DB/Cache, Kafka Event)
-                                 └─ Analytics (Async via Kafka)
-```
-
-## API Endpoints
-
-### Create Short URL
-```bash
-POST /api/v1/shorten
-{
-    "originalUrl": "https://example.com/long/url",
-    "ttlInSeconds": 86400,
-    "customAlias": "my-link"
-}
-```
-
-### Redirect
-```bash
-GET /{shortCode}
-# Returns 302 with Location header, publishes analytics event
-```
-
-### Get URL Statistics
-```bash
-GET /api/v1/stats/{shortCode}
-# Returns: redirectCount, createdAt, riskLevel, etc.
-```
-
-## Analytics with Kafka (Backend)
-
-- **Non-blocking analytics:** Redirects are never delayed by analytics processing.
-- **Event-driven:** Each redirect publishes an event to Kafka.
-- **Consumer:** Processes events to increment click counts and store analytics data.
-- **Scalable:** Handles high throughput and decouples analytics from core redirect logic.
-
-## Rate Limiting
-
-- **Token Bucket Algorithm** (Bucket4j)
-- **Redis-backed** for distributed enforcement
-- **Configurable limits:**
-  - URL shortening: 10 requests/minute per IP
-  - URL access: 100 requests/minute per IP
-
-## AI Risk Detection
-
-- **Asynchronous:** URL risk is checked in the background after creation.
-- **Risk levels:** SAFE, LOW_RISK, MEDIUM_RISK, HIGH_RISK
-- **Stats available:** Users can see risk level for each short URL.
-
-## Database Schema
-
-### UrlEntity (Main URLs Table)
-```sql
-id | original_url | short_code | custom_alias | created_at | ttl_in_seconds | redirect_count | ai_checked | risk_level
-```
-
-### UrlAccessAnalytics (Analytics Table)
-```sql
-id | url_id | short_code | original_url | accessed_at | ip_address | user_agent | created_at
-```
+## Features
+- Shorten long URLs to compact, shareable links
+- Fast redirection using Redis caching
+- Analytics: track link clicks, timestamps, and user metadata
+- Asynchronous analytics processing with Kafka
+- Scalable and production-ready backend
+- Modern Angular frontend
 
 ## Tech Stack
+- **Backend:** Java 17, Spring Boot, Spring Data JPA, Spring Kafka
+- **Database:** PostgreSQL
+- **Cache & Rate Limiting:** Redis
+- **Message Broker:** Apache Kafka
+- **Frontend:** Angular, TypeScript, HTML, CSS
+- **Build Tools:** Maven (backend), npm (frontend)
+
+## Architecture Overview
+- **Frontend:** Angular SPA for creating, managing, and viewing short URLs and analytics
+- **Backend:** Spring Boot REST API
+  - **PostgreSQL:** Persistent storage for URLs and analytics
+  - **Redis:** Caching for fast short code resolution and rate limiting
+  - **Kafka:** Asynchronous event processing for analytics
+
+## Kafka Integration (Analytics)
+- When a user accesses a short URL, the backend:
+  1. Resolves the original URL (fast path)
+  2. Publishes an access event to Kafka (non-blocking)
+  3. Returns redirect immediately
+- **Consumer:** Processes events to increment click counts and store analytics in the database
+
+### Kafka Functionality
+- **Retry / Failure Handling:**
+  - The Kafka consumer is configured with retry logic. If processing fails, the event is retried. After maximum retries, the event is sent to a Dead Letter Queue (DLQ) for later inspection and manual intervention.
+- **Idempotency:**
+  - Consumer logic ensures duplicate events do not result in double-counting. This is achieved by using unique constraints or upsert logic based on event identifiers (such as a combination of shortCode and timestamp).
+- **Partitioning Logic:**
+  - Kafka messages are partitioned by `shortCode` (used as the message key). This ensures all events for a given short URL are processed in order and enables horizontal scalability.
+
+## Setup Instructions
 
 ### Backend
-- **Spring Boot 3.5.9**
-- **Spring Kafka 3.3.11**
-- **PostgreSQL**
-- **Redis**
-- **Bucket4j**
-- **Kafka 3.9.1**
+1. `cd shortify-backend`
+2. Configure `application.properties` for PostgreSQL, Redis, and Kafka
+3. Build and run:
+   ```sh
+   ./mvnw spring-boot:run
+   ```
 
 ### Frontend
-- **Angular 19+**
-- **TypeScript**
-- **RxJS**
+1. `cd shortify-frontend`
+2. Install dependencies:
+   ```sh
+   npm install
+   ```
+3. Start the app:
+   ```sh
+   npm start
+   ```
 
-## Project Structure
-
-```
-shortify/
-├── README.md
-├── shortify-backend/
-│   ├── pom.xml
-│   ├── src/main/java/com/shortify/
-│   │   ├── controller/
-│   │   ├── service/
-│   │   ├── kafka/
-│   │   ├── event/
-│   │   ├── model/
-│   │   ├── repository/
-│   │   └── config/
-│   └── src/test/java/com/shortify/
-│       └── tests/
-└── shortify-frontend/
-    └── src/app/
-```
-
-## Getting Started
-
-### Prerequisites
-- Java 21+
-- PostgreSQL 12+
-- Redis 6.0+
-- Apache Kafka 3.9+
-
-### Backend Setup
-
-1. **Configure databases** (application.properties)
-```properties
-spring.datasource.url=jdbc:postgresql://localhost:5432/shortify
-spring.redis.host=localhost
-spring.kafka.bootstrap-servers=localhost:9092
-```
-
-2. **Build and run**
-```bash
-cd shortify-backend
-./mvnw clean install
-./mvnw spring-boot:run
-```
-
-### Frontend Setup
-```bash
-cd shortify-frontend
-npm install
-ng serve --open
-```
+## API Endpoints
+- `POST /api/shorten` – Create a short URL
+- `GET /{shortCode}` – Redirect to original URL
+- `GET /api/stats/{shortCode}` – Get analytics for a short URL
 
 ## Testing
+- Backend: `./mvnw test`
+- Frontend: `npm test`
 
-Run all Kafka integration tests:
-```bash
-cd shortify-backend
-./mvnw test -Dtest=KafkaIntegrationTest
-```
+## Contributing
+Contributions are welcome! Please open issues or pull requests for improvements.
+
 ## License
-
-MIT License - See LICENSE file for details
+MIT License

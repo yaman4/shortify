@@ -17,10 +17,16 @@ import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.test.context.TestPropertySource;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.serialization.StringDeserializer;
 
 import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.*;
@@ -438,13 +444,82 @@ public class KafkaIntegrationTest {
             // Assert
             Optional<UrlEntity> updated = urlRepository.findByShortCode(testUrlEntity.getShortCode());
             assertTrue(updated.isPresent());
-            assertEquals(2, updated.get().getRedirectCount());
+            assertEquals(1, updated.get().getRedirectCount()); // idempotency: should only increment once
 
             List<UrlAccessAnalytics> analyticsList = analyticsRepository
                     .findByShortCode(testUrlEntity.getShortCode());
-            assertEquals(2, analyticsList.size());
+            assertEquals(1, analyticsList.size()); // idempotency: only one analytics record
 
-            log.info("Duplicate events processed");
+            log.info("Duplicate events processed with idempotency");
+        }
+
+        /**
+         * Test: Consumer retries and sends to DLQ on repeated failure
+         * Verifies: Failed event is retried and then sent to DLQ
+         */
+        @Test
+        @DisplayName("Should send failed event to DLQ after retries")
+        public void testConsumerFailureDLQ() throws Exception {
+            // Arrange: Create an event that will cause the consumer to throw (invalid event: null shortCode)
+            UrlAccessEvent event = new UrlAccessEvent();
+            event.setShortCode(null); // Required field is null, will cause NPE or DB error
+            event.setOriginalUrl("https://dlq-test.example.com");
+            event.setUrlId(-1L);
+            event.setTimestamp(LocalDateTime.now());
+            event.setIp("127.0.0.1");
+            event.setUserAgent("DLQ-Test-Agent");
+
+            // Act: Publish event to Kafka
+            urlAccessEventProducer.publishUrlAccessEvent(event);
+
+            // Assert: Wait and check if event lands in DLQ topic
+            boolean foundInDLQ = false;
+            Properties props = new Properties();
+            props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:29092");
+            props.put(ConsumerConfig.GROUP_ID_CONFIG, "dlq-test-group");
+            props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+            props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+            props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+            try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props)) {
+                consumer.subscribe(Collections.singletonList("url-access-events.DLQ"));
+                for (int i = 0; i < 10; i++) {
+                    var records = consumer.poll(java.time.Duration.ofSeconds(1));
+                    if (!records.isEmpty()) {
+                        foundInDLQ = true;
+                        break;
+                    }
+                }
+            }
+            assertTrue(foundInDLQ, "Event should be sent to DLQ after retries");
+        }
+
+        /**
+         * Test: Idempotency - duplicate event does not create duplicate analytics
+         */
+        @Test
+        @DisplayName("Should not create duplicate analytics for same event (idempotency)")
+        public void testIdempotencyOnDuplicateEvent() {
+            // Arrange
+            UrlAccessEvent event = new UrlAccessEvent();
+            event.setShortCode(testUrlEntity.getShortCode());
+            event.setOriginalUrl(testUrlEntity.getOriginalUrl());
+            event.setUrlId(testUrlEntity.getId());
+            LocalDateTime now = LocalDateTime.now();
+            event.setTimestamp(now);
+            event.setIp("192.168.1.100");
+            event.setUserAgent("Mozilla/5.0");
+
+            // Act: Process same event twice
+            urlAccessEventConsumer.consumeUrlAccessEvent(event);
+            urlAccessEventConsumer.consumeUrlAccessEvent(event);
+
+            // Assert
+            List<UrlAccessAnalytics> analyticsList = analyticsRepository
+                    .findByShortCode(testUrlEntity.getShortCode());
+            long count = analyticsList.stream()
+                    .filter(a -> a.getAccessedAt().equals(now) && "Mozilla/5.0".equals(a.getUserAgent()))
+                    .count();
+            assertEquals(1, count, "Duplicate analytics record should not be created");
         }
     }
 

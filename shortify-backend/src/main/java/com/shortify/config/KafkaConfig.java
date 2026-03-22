@@ -15,6 +15,10 @@ import org.springframework.kafka.config.KafkaListenerContainerFactory;
 import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.core.*;
 import org.springframework.kafka.listener.ConcurrentMessageListenerContainer;
+import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
+import org.apache.kafka.common.TopicPartition;
+import org.springframework.util.backoff.FixedBackOff;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.kafka.support.serializer.JsonSerializer;
 
@@ -121,6 +125,7 @@ public class KafkaConfig {
 
     /**
      * Kafka listener container factory for concurrent message processing
+     * Adds retry and DLQ (Dead Letter Queue) support
      */
     @Bean
     public KafkaListenerContainerFactory<ConcurrentMessageListenerContainer<String, UrlAccessEvent>>
@@ -128,16 +133,21 @@ public class KafkaConfig {
 
         ConcurrentKafkaListenerContainerFactory<String, UrlAccessEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
-
         factory.setConsumerFactory(consumerFactory);
-
         // Concurrency level - process messages from multiple partitions concurrently
         factory.setConcurrency(3);
-
         // Poll timeout
         factory.getContainerProperties().setPollTimeout(3000);
+
+        // Retry: 3 attempts, then send to DLQ
+        factory.setCommonErrorHandler(new DefaultErrorHandler(
+                new DeadLetterPublishingRecoverer(
+                        kafkaTemplate(producerFactory()),
+                        (record, ex) -> new TopicPartition("url-access-events.DLQ", record.partition())
+                ),
+                new FixedBackOff(1000L, 3) // 1 second interval, 3 attempts
+        ));
 
         return factory;
     }
 }
-

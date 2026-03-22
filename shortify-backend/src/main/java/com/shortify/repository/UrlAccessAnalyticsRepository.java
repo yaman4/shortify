@@ -49,5 +49,9 @@ public interface UrlAccessAnalyticsRepository extends JpaRepository<UrlAccessAna
             @Param("startTime") LocalDateTime startTime,
             @Param("endTime") LocalDateTime endTime
     );
-}
 
+    /**
+     * Check if an analytics event already exists (for idempotency)
+     */
+    boolean existsByShortCodeAndAccessedAtAndUserAgent(String shortCode, java.time.LocalDateTime accessedAt, String userAgent);
+}

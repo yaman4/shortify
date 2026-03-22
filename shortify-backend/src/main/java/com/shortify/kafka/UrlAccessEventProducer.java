@@ -27,6 +27,8 @@ public class UrlAccessEventProducer {
     /**
      * Publishes a URL access event to Kafka topic
      * This method is non-blocking and returns immediately
+     * Partitioning logic: shortCode is used as the Kafka message key, ensuring all events for the same shortCode
+     * go to the same partition. This preserves order and enables scalable processing.
      *
      * @param event the URL access event to publish
      */
@@ -52,4 +54,3 @@ public class UrlAccessEventProducer {
         }
     }
 }
-

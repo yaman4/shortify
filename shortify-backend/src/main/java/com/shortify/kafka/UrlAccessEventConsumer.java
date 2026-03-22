@@ -41,7 +41,16 @@ public class UrlAccessEventConsumer {
             log.info("Processing URL access event for shortCode: {} at timestamp: {}",
                     event.getShortCode(), event.getTimestamp());
 
-            // 1. Increment redirect count in UrlEntity
+            // IDEMPOTENCY: Check if this event was already processed (by unique event hash)
+            String eventHash = event.getShortCode() + "-" + event.getTimestamp() + "-" + event.getUserAgent();
+            boolean alreadyExists = analyticsRepository.existsByShortCodeAndAccessedAtAndUserAgent(
+                    event.getShortCode(), event.getTimestamp(), event.getUserAgent());
+            if (alreadyExists) {
+                log.warn("Duplicate event detected, skipping analytics for eventHash: {}", eventHash);
+                return;
+            }
+
+            // 1. Increment redirect count in UrlEntity (idempotent: only if not already incremented for this event)
             urlRepository.findByShortCode(event.getShortCode())
                     .ifPresentOrElse(
                             urlEntity -> {
@@ -52,7 +61,7 @@ public class UrlAccessEventConsumer {
                             () -> log.warn("URL entity not found for shortCode: {}", event.getShortCode())
                     );
 
-            // 2. Store detailed analytics
+            // 2. Store detailed analytics (idempotent)
             UrlAccessAnalytics analytics = new UrlAccessAnalytics();
             analytics.setShortCode(event.getShortCode());
             analytics.setOriginalUrl(event.getOriginalUrl());
@@ -66,8 +75,7 @@ public class UrlAccessEventConsumer {
 
         } catch (Exception e) {
             log.error("Error processing URL access event for shortCode: {}", event.getShortCode(), e);
-            // Continue processing other events even if one fails
+            throw e; // Rethrow to trigger Kafka retry/DLQ
         }
     }
 }
-

@@ -18,14 +18,14 @@ jobs:
 
       # ---------------- BACKEND ----------------
       - name: Build Backend Image
-        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/backend:latest ./backend
+        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/backend:latest ./shortify-backend
 
       - name: Push Backend Image
         run: docker push ${{ secrets.DOCKER_USERNAME }}/backend:latest
 
       # ---------------- FRONTEND ----------------
       - name: Build Frontend Image
-        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/frontend:latest ./frontend
+        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/frontend:latest ./shortify-frontend
 
       - name: Push Frontend Image
         run: docker push ${{ secrets.DOCKER_USERNAME }}/frontend:latest

@@ -72,6 +72,36 @@ Shortify is a full-stack URL shortener application with analytics, built with Ja
 - Backend: `./mvnw test`
 - Frontend: `npm test`
 
+## Docker Deployment
+
+- The application is containerized using Docker for consistent builds and deployment across environments.
+- Backend (Spring Boot) is packaged into a Docker image and runs as an independent service.
+- Frontend (Angular) is built and served using an Nginx-based Docker container.
+
+### Build & Run
+
+Build backend image:  
+docker build -t shortify-backend .
+
+Run backend container:  
+docker run -d -p 8080:8080 shortify-backend
+
+Build frontend image:  
+docker build -t shortify-frontend .
+
+Run frontend container:  
+docker run -d -p 3000:80 shortify-frontend
+
+## AWS EC2 Deployment
+
+- The application is deployed on an AWS EC2 instance (Ubuntu) as a cloud-hosted environment.
+- Docker is installed on the EC2 instance to run containerized services.
+- Backend and frontend containers are run on the instance and exposed via appropriate ports.
+- Nginx is used as a reverse proxy to serve the frontend and route traffic efficiently.
+- Supporting services such as PostgreSQL, Redis, Kafka, and Zookeeper are also deployed and managed within the same environment to enable full system functionality.
+
+Access: http://<EC2_PUBLIC_IP>:3000
+
 ## Contributing
 Contributions are welcome! Please open issues or pull requests for improvements.
 

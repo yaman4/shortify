@@ -3,7 +3,7 @@ package com.shortify.model;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.apache.commons.lang3.RandomStringUtils;
+import com.shortify.util.Base62Encoder;
 
 import java.time.LocalDateTime;
 
@@ -44,9 +44,7 @@ public class UrlEntity {
 
     @PrePersist
     public void prePersist() {
-        if (shortCode == null || shortCode.isEmpty()) {
-            shortCode = RandomStringUtils.randomAlphanumeric(6);
-        }
+        // Don't generate shortCode here - wait for ID to be assigned in PostPersist
         if (createdAt == null) {
             createdAt = LocalDateTime.now();
         }
@@ -58,6 +56,27 @@ public class UrlEntity {
         }
         if (riskLevel == null) {
             riskLevel = RiskLevel.UNKNOWN;
+        }
+    }
+
+    @PostPersist
+    public void postPersist() {
+        // Generate shortCode from ID using Base62 encoding after persistence.
+        // Collision Prevention Strategy:
+        // - Each URL gets a unique auto-increment ID from database
+        // - ID is encoded using Base62 (0-9, a-z, A-Z) = 62 chars
+        // - No two IDs will ever produce same short code
+        // - Guarantees uniqueness without retry logic
+        // Examples: ID 1 → "1", ID 62 → "10", ID 3843 → "zzz", ID 238328 → "1000"
+        
+        if ((shortCode == null || shortCode.isEmpty()) && id != null) {
+            // Only generate if not set (no custom alias provided)
+            shortCode = new Base62Encoder().encode(id);
+        } else if (customAlias == null || customAlias.isEmpty()) {
+            // Fallback: if custom alias is empty but shortCode exists, encode ID
+            if (id != null) {
+                shortCode = new Base62Encoder().encode(id);
+            }
         }
     }
 }

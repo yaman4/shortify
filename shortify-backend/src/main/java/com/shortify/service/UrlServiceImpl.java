@@ -29,13 +29,27 @@ public class UrlServiceImpl implements UrlService {
         urlEntity.setOriginalUrl(request.getOriginalUrl());
         urlEntity.setTtlInSeconds(request.getTtlInSeconds());
 
-        // Optional: if you allow custom alias
+        /**
+         * Collision Prevention Strategy:
+         * 
+         * 1. Custom Alias Path (if provided):
+         *    - Use the custom alias as-is
+         *    - Unique constraint will prevent duplicates
+         *    - User takes responsibility for uniqueness
+         *
+         * 2. Default Path (if no custom alias):
+         *    - Leave shortCode null → triggers @PostPersist in UrlEntity
+         *    - After DB assigns unique ID → convert ID to Base62
+         *    - Guarantees NO collisions (each ID maps to unique shortCode)
+         *    - Example: ID 238328 → shortCode "1000"
+         */
         if (request.getCustomAlias() != null && !request.getCustomAlias().isEmpty()) {
             urlEntity.setCustomAlias(request.getCustomAlias());
             urlEntity.setShortCode(request.getCustomAlias());
         }
+        // else: shortCode remains null, will be generated in @PostPersist using Base62
 
-        // Save entity (shortCode will be generated automatically if null)
+        // Save entity (shortCode will be generated from ID if not provided)
         urlRepository.save(urlEntity);
 
         String shortUrl = "http://localhost:8080/" + urlEntity.getShortCode();

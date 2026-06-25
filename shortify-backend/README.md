@@ -7,7 +7,7 @@ Key components
 - `com.shortify.controller.UrlController` - HTTP API for creating short URLs and fetching stats.
 - `com.shortify.controller.RedirectController` - Handles redirection for `/{shortCode}`.
 - `com.shortify.service.UrlServiceImpl` - Core shortening logic (creates `UrlEntity`, persists it, and builds the `shortUrl` returned to the caller).
-- `com.shortify.model.UrlEntity` - JPA entity that stores the original URL, short code and metadata. Short codes are generated in the `@PrePersist` method if not provided.
+- `com.shortify.model.UrlEntity` - JPA entity that stores the original URL, short code and metadata. Short codes are generated in the `@PostPersist` method using Base62 encoding if not provided.
 - `com.shortify.async.AiAsyncProcessor` / `com.shortify.service.AiService` - Placeholder AI logic to classify URLs.
 
 Why `shortUrl` contains `http://localhost:8080` and how to fix it
@@ -15,7 +15,12 @@ Why `shortUrl` contains `http://localhost:8080` and how to fix it
 The current implementation builds the returned `shortUrl` with a hard-coded base URL in `UrlServiceImpl`:
 
 - Look at `UrlServiceImpl`: it sets `String shortUrl = "http://localhost:8080/" + urlEntity.getShortCode();` when returning the `ShortenResponse`.
-- The short code itself is generated in `UrlEntity#prePersist()` using `RandomStringUtils.randomAlphanumeric(6)` when no custom alias is provided.
+- Short codes are generated using **Base62 encoding of the database ID** (in `UrlEntity#postPersist()`). This approach guarantees collision-free generation:
+  - Each URL gets a unique auto-increment ID from PostgreSQL
+  - The ID is encoded to Base62 (using characters 0-9, a-z, A-Z)
+  - Different IDs always produce different short codes
+  - Example: ID 238328 → Base62 "1000"
+  - Capacity: 6-character codes support 56.8 billion URLs
 
 Because the base URL is hard-coded to `http://localhost:8080`, the API returns that value. In production you should not return localhost. Options to fix:
 
@@ -89,7 +94,8 @@ Deployment notes
 
 Development tips
 
-- Short code generation lives inside `UrlEntity#prePersist()`. If you want more control or to avoid duplicates you can move generation into a service and ensure uniqueness before save.
+- Short code generation uses Base62 encoding in `UrlEntity#postPersist()` to ensure collision-free generation. The @PostPersist hook executes after the database assigns a unique ID, which is then encoded to a short Base62 string.
+- Custom aliases are still supported via the `customAlias` field - if provided, the custom alias is used instead of Base62 encoding.
 - If you change how the short URL is built, update `ShortenResponse` and any clients accordingly.
 
 Helpful commands
@@ -108,7 +114,8 @@ Helpful commands
 Where to look in code (quick references)
 
 - `src/main/java/com/shortify/service/UrlServiceImpl.java` — builds the `shortUrl` returned to clients (currently hard-coded base URL).
-- `src/main/java/com/shortify/model/UrlEntity.java` — short code generation logic in `@PrePersist`.
+- `src/main/java/com/shortify/model/UrlEntity.java` — short code generation logic in `@PostPersist` using Base62 encoding.
+- `src/main/java/com/shortify/util/Base62Encoder.java` — Base62 encoding utility for collision-free code generation.
 - `src/main/java/com/shortify/controller/UrlController.java` — endpoint to shorten URLs.
 - `src/main/java/com/shortify/controller/RedirectController.java` — redirect handling for incoming short URLs.
 

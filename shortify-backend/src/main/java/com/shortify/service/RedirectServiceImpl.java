@@ -11,6 +11,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import jakarta.servlet.http.HttpServletRequest;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 
 @Slf4j
@@ -19,14 +20,21 @@ public class RedirectServiceImpl implements RedirectService {
 
     private final UrlRepository urlRepository;
     private final UrlAccessEventProducer urlAccessEventProducer;
+    private final CacheService cacheService;
 
-    public RedirectServiceImpl(UrlRepository urlRepository, UrlAccessEventProducer urlAccessEventProducer) {
+    public RedirectServiceImpl(UrlRepository urlRepository, UrlAccessEventProducer urlAccessEventProducer, CacheService cacheService) {
         this.urlRepository = urlRepository;
         this.urlAccessEventProducer = urlAccessEventProducer;
+        this.cacheService = cacheService;
     }
 
     /**
      * Fetches the original URL by short code and publishes an async event for analytics.
+     *
+     * Caching strategy:
+     * 1. Check Redis cache first (cache hit → return immediately)
+     * 2. Cache miss → query database, populate cache with per-URL TTL, return URL
+     * 3. TTL respects user-provided ttlInSeconds (or no expiration if null)
      *
      * The increment of redirect count is now handled asynchronously by Kafka consumer.
      * This keeps the redirect response fast and decouples analytics from the redirect flow.
@@ -36,28 +44,51 @@ public class RedirectServiceImpl implements RedirectService {
      */
     @Transactional
     public String getLongUrlAndPublishEvent(String shortCode) {
-        // Find the URL entity by short code
+        // Try cache first (write-through strategy)
+        var cachedUrl = cacheService.get(shortCode);
+        if (cachedUrl.isPresent()) {
+            log.debug("Cache hit for shortCode: {}", shortCode);
+            publishAnalyticsEvent(shortCode, cachedUrl.get());
+            return cachedUrl.get();
+        }
+
+        // Cache miss - fetch from database
         UrlEntity urlEntity = urlRepository.findByShortCode(shortCode)
                 .orElseThrow(() -> new RuntimeException("Short URL not found"));
 
-        // Extract request details for analytics
+        // Cache the URL with its configured TTL
+        if (urlEntity.getTtlInSeconds() != null) {
+            cacheService.put(shortCode, urlEntity.getOriginalUrl(), Duration.ofSeconds(urlEntity.getTtlInSeconds()));
+            log.debug("Cached shortCode: {} with TTL: {} seconds", shortCode, urlEntity.getTtlInSeconds());
+        } else {
+            // No TTL provided - cache indefinitely (will only be evicted on manual deletion)
+            cacheService.put(shortCode, urlEntity.getOriginalUrl(), Duration.ofDays(365));
+            log.debug("Cached shortCode: {} with default long TTL", shortCode);
+        }
+
+        publishAnalyticsEvent(shortCode, urlEntity.getOriginalUrl());
+
+        // Return the original URL immediately (fast path)
+        return urlEntity.getOriginalUrl();
+    }
+
+    /**
+     * Extracts request details and publishes URL access event for analytics
+     */
+    private void publishAnalyticsEvent(String shortCode, String originalUrl) {
         String ipAddress = getClientIp();
         String userAgent = getUserAgent();
 
         // Create and publish event (non-blocking)
         UrlAccessEvent event = new UrlAccessEvent();
         event.setShortCode(shortCode);
-        event.setOriginalUrl(urlEntity.getOriginalUrl());
-        event.setUrlId(urlEntity.getId());
+        event.setOriginalUrl(originalUrl);
         event.setTimestamp(LocalDateTime.now());
         event.setIp(ipAddress);
         event.setUserAgent(userAgent);
 
         urlAccessEventProducer.publishUrlAccessEvent(event);
         log.debug("Published URL access event for shortCode: {} (async)", shortCode);
-
-        // Return the original URL immediately (fast path)
-        return urlEntity.getOriginalUrl();
     }
 
     @Override

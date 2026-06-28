@@ -22,8 +22,42 @@ Shortify is a full-stack URL shortener application with analytics, built with Ja
 - **Frontend:** Angular SPA for creating, managing, and viewing short URLs and analytics
 - **Backend:** Spring Boot REST API
   - **PostgreSQL:** Persistent storage for URLs and analytics
-  - **Redis:** Caching for fast short code resolution and rate limiting
+  - **Redis:** Write-through caching with per-URL configurable TTLs for fast short code resolution
   - **Kafka:** Asynchronous event processing for analytics
+  - **Rate Limiting:** Token bucket algorithm (Bucket4j) with per-IP, per-endpoint limiting
+
+## Caching Strategy
+- **Type:** Write-through caching with per-URL configurable TTLs
+- **Implementation:** Redis (StringRedisTemplate) backed by RedisCacheService
+- **Cache Key Format:** `shortify:{shortCode}` (string key-value pairs)
+- **TTL Behavior:** 
+  - If `ttlInSeconds` provided on URL creation → respects that TTL
+  - If no TTL provided → default 365-day cache duration
+  - Redis auto-expiration matches database cleanup schedule
+- **Cache Warmup:** 
+  - On URL creation: immediately cached after DB persistence
+  - On first redirect: cached on DB miss for future hits
+- **Redirect Path:** Cache-first lookup (1-2ms hit) → DB fallback (50-100ms miss) → cache repopulation
+- **Performance:** ~5-10x faster redirects for hot/cached URLs
+
+## Rate Limiting
+- **Strategy:** Hybrid local + distributed (Bucket4j + Redis)
+- **Architecture:** 
+  - **Fast Path:** Local in-memory Bucket4j per instance (~1-2ms)
+  - **Cross-Instance Sync:** Redis tracks consumption for distributed awareness
+  - **Fallback:** If local bucket exhausted, check Redis state
+  - **Resilience:** Graceful degradation if Redis unavailable (fail-open)
+- **Limits by Endpoint:**
+  - `/api/v1/shorten`: 10 requests per minute per IP
+  - All other endpoints: 100 requests per minute per IP
+- **Key Format:** `rate_limit:{ip}:{path}` (RAtomicLong in Redis)
+- **Expiration:** Auto-cleanup after 1 minute (no stale counters)
+- **Enforcement:** Per-IP basis (different IPs have separate limits)
+- **Implementation Details:**
+  - Each request first checks local Bucket4j (no network I/O)
+  - On token consumption, syncs to Redis (async-friendly)
+  - If local bucket empty, queries Redis for cross-instance state
+  - Returns 429 (Too Many Requests) when limit exceeded
 
 ## Kafka Integration (Analytics)
 - When a user accesses a short URL, the backend:
@@ -33,14 +67,30 @@ Shortify is a full-stack URL shortener application with analytics, built with Ja
 - **Consumer:** Processes events to increment click counts and store analytics in the database
 
 ### Kafka Functionality
+- **Event Type:** `UrlAccessEvent` published on every redirect
+  - Payload: `shortCode`, `timestamp`, `ip`, `userAgent`, `originalUrl`, `urlId`
+  - Topic: `url-access-events` (3 partitions)
+  - Partitioning: By `shortCode` to ensure ordering per URL
+- **Producer Config:** Acks=1 (leader write), 3x retries with 100ms backoff, Snappy compression
+- **Consumer Config:** 
+  - Group: `shortify-analytics-group`
+  - Concurrency: 3 (processes from multiple partitions in parallel)
+  - Auto-commit: Every 5 seconds
 - **Retry / Failure Handling:**
-  - The Kafka consumer is configured with retry logic. If processing fails, the event is retried. After maximum retries, the event is sent to a Dead Letter Queue (DLQ) for later inspection and manual intervention.
+  - 3 retry attempts with 1-second fixed backoff (~3 seconds total)
+  - After max retries → message sent to Dead Letter Queue (DLQ)
+  - DLQ Topic: `url-access-events.DLQ` (requires manual inspection/recovery)
 - **Idempotency:**
-  - Consumer ensures duplicate events do not result in double-counting by using idempotent processing (e.g., unique event identifiers or deduplication logic before updating analytics).
-- **Partitioning Logic:**
-  - Kafka messages are partitioned by `shortCode` (used as the message key). This ensures all events for a given short URL are processed in order and enables horizontal scalability.
+  - Consumer deduplicates by `shortCode + timestamp + userAgent`
+  - Prevents double-counting on retries
+- **Decoupling:**
+  - Events published asynchronously (non-blocking fire-and-forget)
+  - Redirect response sent immediately (doesn't wait for consumer)
+  - Analytics updated eventually-consistent (seconds later)
 - **Scalability:**
-    - Kafka consumers are part of a consumer group and can scale horizontally to handle increasing traffic without impacting redirect latency.
+  - Kafka consumers horizontally scalable with consumer groups
+  - Message partitioning by shortCode enables parallel processing
+  - Kafka doesn't impact redirect latency
 
 ## Setup Instructions
 

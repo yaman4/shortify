@@ -86,6 +86,13 @@
             <version>8.1.0</version>
         </dependency>
 
+        <!-- Bucket4j Redis support for distributed rate limiting -->
+        <dependency>
+            <groupId>com.bucket4j</groupId>
+            <artifactId>bucket4j-redis</artifactId>
+            <version>8.1.0</version>
+        </dependency>
+
         <!-- Redisson for Redis-based Bucket4j -->
         <dependency>
             <groupId>org.redisson</groupId>
